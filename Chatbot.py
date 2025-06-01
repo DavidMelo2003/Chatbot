@@ -5,10 +5,10 @@ import json
 import time
 import os
 
-# --- PRIMERA LLAMADA A STREAMLIT: set_page_config ---
+# --- 1. CONFIGURACIÓN INICIAL DE STREAMLIT ---
 st.set_page_config(page_title="EmprendoBot IoT", layout="wide", initial_sidebar_state="expanded")
 
-# --- Configuración API DeepSeek ---
+# --- 2. CONFIGURACIÓN DE LA API DE DEEPSEEK ---
 try:
     API_KEY = st.secrets["DEEPSEEK_API_KEY"]
 except KeyError:
@@ -17,7 +17,7 @@ except KeyError:
 API_URL = 'https://api.deepseek.com/v1/chat/completions'
 MODEL_NAME = "deepseek-chat"
 
-# --- Mensaje de Sistema Especializado ---
+# --- 3. MENSAJE DE SISTEMA PARA EL BOT ---
 SYSTEM_PROMPT_ENTREPRENEURSHIP_IOT = """
 Eres EmprendoBot, un asistente experto en emprendimiento con un fuerte enfoque en el Internet de las Cosas (IoT).
 Tu objetivo es ayudar a los usuarios a:
@@ -31,11 +31,12 @@ Mantén un tono profesional, alentador y práctico. Proporciona ejemplos concret
 Responde siempre en español.
 """
 
+# --- 4. FUNCIONES AUXILIARES ---
+
 def get_deepseek_response(prompt_messages):
     """Obtiene respuesta de la API de DeepSeek."""
     if not API_KEY:
         return "❌ Error: API Key de DeepSeek no configurada. Por favor contacta al administrador."
-
     headers = {
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {API_KEY}'
@@ -46,19 +47,16 @@ def get_deepseek_response(prompt_messages):
         "max_tokens": st.session_state.get("max_tokens", 1500),
         "temperature": st.session_state.get("temperature", 0.7),
     }
-
     try:
         response = requests.post(API_URL, headers=headers, json=data, timeout=90)
         response.raise_for_status()
         response_json = response.json()
-
         if "choices" in response_json and len(response_json["choices"]) > 0:
             assistant_message = response_json["choices"][0]["message"]["content"]
             return assistant_message.strip()
         else:
             st.error(f"Respuesta inesperada de la API: {response_json}")
             return "Lo siento, no pude obtener una respuesta válida de EmprendoBot."
-
     except requests.exceptions.Timeout:
         st.error("La solicitud a EmprendoBot tardó demasiado (timeout).")
         return "Lo siento, la respuesta tardó demasiado. ¿Podrías reformular tu pregunta?"
@@ -73,7 +71,7 @@ def get_deepseek_response(prompt_messages):
         return "Lo siento, ocurrió un error inesperado."
 
 def display_typing_effect(text, placeholder):
-    """Simula efecto de escritura."""
+    """Simula efecto de escritura en el chat."""
     full_response = ""
     words = text.split(" ")
     for i, word in enumerate(words):
@@ -86,9 +84,12 @@ def display_typing_effect(text, placeholder):
 
 def text_to_speech_component(text, auto_play=False):
     """
-    Crea un componente HTML con JavaScript para TTS, con ajustes para autoplay más confiable.
+    Crea un componente HTML con JavaScript para TTS (speechSynthesis),
+    con un retardo controlado para que el auto-play sea más confiable.
     """
-    clean_text = text.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"').replace("\n", " ").replace("\r", "")
+    # Limpieza básica del texto
+    clean_text = text.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')\
+                     .replace("\n", " ").replace("\r", "")
     if len(clean_text) > 1000:
         clean_text = clean_text[:997] + "..."
     component_id = f"tts_{hash(text) % 10000}"
@@ -100,9 +101,7 @@ def text_to_speech_component(text, auto_play=False):
         <meta charset="utf-8">
         <style>
             body {{
-                margin: 0;
-                padding: 10px;
-                font-family: Arial, sans-serif;
+                margin: 0; padding: 10px; font-family: Arial, sans-serif;
             }}
             .tts-container {{
                 text-align: center;
@@ -236,8 +235,9 @@ def text_to_speech_component(text, auto_play=False):
 
 def voice_to_text_component():
     """
-    Componente HTML/JS para reconocimiento de voz en español,
-    que inyecta el texto en el st.chat_input y envía automáticamente.
+    Componente HTML/JS para reconocimiento de voz en español con SpeechRecognition.
+    Busca el último <textarea> en la página y lo rellena con el texto dictado,
+    luego hace clic en el botón de envío del formulario contenedor.
     """
     html_voice = f"""
     <html>
@@ -290,18 +290,25 @@ def voice_to_text_component():
                     const transcript = event.results[0][0].transcript;
                     statusEl.textContent = '✅ Capturado: ' + transcript;
                     setTimeout(function() {{
-                        const textarea = document.querySelector('textarea[data-baseweb="input"]');
+                        // Tomamos el último <textarea> que exista en la página
+                        const textareas = document.querySelectorAll('textarea');
+                        const textarea = textareas[textareas.length - 1];
                         if (textarea) {{
                             textarea.value = transcript;
                             const inputEvent = new Event('input', {{ bubbles: true }});
                             textarea.dispatchEvent(inputEvent);
-                            const sendButton = textarea.closest('form').querySelector('button[type="submit"]');
-                            if (sendButton) {{
-                                sendButton.click();
+
+                            // Buscamos el botón de envío dentro del mismo <form> contenedor
+                            const form = textarea.closest('form');
+                            if (form) {{
+                                const sendButton = form.querySelector('button[type="submit"]');
+                                if (sendButton) {{
+                                    sendButton.click();
+                                }}
                             }}
                         }} else {{
-                            console.warn('No se encontró el textarea de chat_input');
-                            statusEl.textContent = '❌ No se encontró el input del chat';
+                            console.warn('No se encontró ningún <textarea> en la página');
+                            statusEl.textContent = '❌ No se encontró el campo de chat';
                         }}
                     }}, 300);
                 }};
@@ -316,12 +323,66 @@ def voice_to_text_component():
     """
     components.html(html_voice, height=120)
 
+def process_user_input(user_text):
+    """Procesa la entrada del usuario y genera respuesta con TTS."""
+    if user_text:
+        # 1) Agregamos mensaje del usuario al historial
+        st.session_state.messages.append({"role": "user", "content": user_text})
+        with st.chat_message("user"):
+            st.markdown(user_text)
 
-# --- Interfaz de Streamlit ---
+        # 2) Generamos respuesta del asistente
+        with st.chat_message("assistant", avatar="🤖"):
+            message_placeholder = st.empty()
+            with st.spinner("EmprendoBot está generando ideas... 💡"):
+                # Limitar historial para la API
+                max_history_items_api = 15
+                api_messages = []
+                if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
+                    api_messages.append(st.session_state.messages[0])
+                    user_assistant_messages = [
+                        m for m in st.session_state.messages[1:] 
+                        if m["role"] in ["user", "assistant"]
+                    ]
+                    api_messages.extend(user_assistant_messages[-(max_history_items_api - 1):])
+                else:
+                    api_messages.append({"role": "system", "content": SYSTEM_PROMPT_ENTREPRENEURSHIP_IOT})
+                    user_assistant_messages = [
+                        m for m in st.session_state.messages 
+                        if m["role"] in ["user", "assistant"]
+                    ]
+                    api_messages.extend(user_assistant_messages[-max_history_items_api:])
+
+                assistant_response = get_deepseek_response(api_messages)
+
+            # Mostrar respuesta con efecto de escritura
+            final_response = display_typing_effect(assistant_response, message_placeholder)
+
+            # Mostrar componente TTS para la respuesta generada
+            if auto_tts:
+                text_to_speech_component(final_response, auto_play=True)
+            else:
+                text_to_speech_component(final_response, auto_play=False)
+
+        # 3) Añadimos la respuesta al historial y limitamos longitud
+        st.session_state.messages.append({"role": "assistant", "content": final_response})
+        max_history_streamlit = 40
+        if len(st.session_state.messages) > max_history_streamlit:
+            if st.session_state.messages[0]["role"] == "system":
+                st.session_state.messages = (
+                    [st.session_state.messages[0]] +
+                    st.session_state.messages[-(max_history_streamlit - 1):]
+                )
+            else:
+                st.session_state.messages = st.session_state.messages[-max_history_streamlit:]
+
+# --- 5. INTERFAZ PRINCIPAL DE STREAMLIT ---
+
+# 5.1. Título y descripción
 st.title("🚀 EmprendoBot IoT Assistant")
 st.caption("Tu copiloto para ideas de negocio IoT y planes de emprendimiento.")
 
-# --- Sidebar para Opciones ---
+# 5.2. Sidebar con opciones
 with st.sidebar:
     st.header("⚙️ Opciones")
     auto_tts = st.checkbox("🔊 Reproducir respuestas automáticamente", value=False,
@@ -365,31 +426,31 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("**Desarrollado con IA y ☕**")
 
-# --- Inicializar historial ---
+# 5.3. Inicializamos historial de chat si no existe
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "system", "content": SYSTEM_PROMPT_ENTREPRENEURSHIP_IOT}
     ]
 
-# --- Mostrar mensajes previos ---
+# 5.4. Mostramos mensajes previos (usuario y asistente)
 for i, message in enumerate(st.session_state.messages):
     if message["role"] == "system":
         continue
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if message["role"] == "assistant":
-            # Se pasa auto_tts sólo cuando se genera la respuesta, no durante la reproducción manual
+            # Insertamos siempre el TTS para respuestas del asistente
             text_to_speech_component(message["content"], auto_play=False)
 
-# --- Llamada al componente de dictado de voz ---
+# 5.5. Componente de dictado de voz (antes del chat_input)
 voice_to_text_component()
 
-# --- Input del chat ---
+# 5.6. Caja de entrada del chat
 if prompt := st.chat_input("Pregunta a EmprendoBot sobre tu idea IoT...", key="chat_input_main"):
     process_user_input(prompt)
     st.rerun()
 
-# --- Información adicional si aún no hay conversación iniciada ---
+# 5.7. Mensajes de ejemplo si no hay conversación aún
 if len(st.session_state.messages) == 1:
     st.markdown("---")
     col1, col2, col3 = st.columns(3)
@@ -403,7 +464,7 @@ if len(st.session_state.messages) == 1:
         st.markdown("### 🌱 AgTech")
         st.markdown("Agricultura de precisión, monitoreo ambiental")
 
-# --- Verificar configuración (API Key) ---
+# 5.8. Verificación de la API Key
 if not API_KEY:
     st.error("⚠️ **Configuración requerida**: Necesitas configurar tu API Key de DeepSeek en los secrets de Streamlit.")
     with st.expander("📋 Instrucciones de configuración"):
@@ -412,7 +473,7 @@ if not API_KEY:
         2. Abre **Settings** > **Secrets**  
         3. Agrega tu API key en formato TOML:
         ```toml
-        DEEPSEEK_API_KEY = "tu-api-key-aqui"
+        DEEPSEEK_API_KEY = "tu-api-key-deepseek-aquí"
         ```
         4. Guarda y reinicia la app  
         """)
