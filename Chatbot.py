@@ -4,23 +4,20 @@ import requests
 import json
 import time
 import os
-import uuid # Para IDs únicos
+import uuid
 
-# --- PRIMERA LLAMADA A STREAMLIT DEBE SER set_page_config ---
 st.set_page_config(page_title="EmprendoBot IoT", layout="wide", initial_sidebar_state="expanded")
 
-# --- Configuración API DeepSeek ---
 try:
     API_KEY = st.secrets["DEEPSEEK_API_KEY"]
-except (KeyError, AttributeError): # AttributeError para manejar el caso donde st.secrets no existe localmente
-    API_KEY = os.environ.get("DEEPSEEK_API_KEY", "") # Para desarrollo local con .env
+except (KeyError, AttributeError):
+    API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
     if not API_KEY:
         st.error("⚠️ API Key no configurada. Configura DEEPSEEK_API_KEY en tus secrets o variables de entorno.")
 
 API_URL = 'https://api.deepseek.com/v1/chat/completions'
 MODEL_NAME = "deepseek-chat"
 
-# --- Mensaje de Sistema Especializado ---
 SYSTEM_PROMPT_ENTREPRENEURSHIP_IOT = """
 Eres EmprendoBot, un asistente experto en emprendimiento con un fuerte enfoque en el Internet de las Cosas (IoT).
 Tu objetivo es ayudar a los usuarios a:
@@ -37,7 +34,6 @@ Responde siempre en español.
 """
 
 def get_deepseek_response(prompt_messages):
-    """Obtiene respuesta de la API de DeepSeek."""
     if not API_KEY:
         return "❌ Error: API Key de DeepSeek no configurada. Por favor contacta al administrador."
 
@@ -78,7 +74,6 @@ def get_deepseek_response(prompt_messages):
         return "Lo siento, ocurrió un error inesperado."
 
 def display_typing_effect(text, placeholder):
-    """Simula efecto de escritura."""
     full_response = ""
     words = text.split(" ")
 
@@ -92,14 +87,11 @@ def display_typing_effect(text, placeholder):
     return full_response.strip()
 
 def text_to_speech_component(text, auto_play=False, component_key_suffix=""):
-    """Crea un componente HTML con JavaScript para TTS que funciona mejor en Streamlit."""
     clean_text = text.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"').replace("\n", " ").replace("\r", "")
     
-    # Truncar texto largo para evitar problemas con la URL o el motor TTS
-    if len(clean_text) > 950: # SpeechSynthesisUtterance tiene límites
+    if len(clean_text) > 950:
         clean_text = clean_text[:947] + "..."
     
-    # Usar un ID único para cada instancia del componente TTS
     component_id = f"tts_{uuid.uuid4().hex[:8]}_{component_key_suffix}"
     
     html_code = f"""
@@ -148,7 +140,7 @@ def text_to_speech_component(text, auto_play=False, component_key_suffix=""):
                     if(playBtn_{component_id}) playBtn_{component_id}.disabled = true;
                     return;
                 }}
-                window.speechSynthesis.cancel(); // Detener cualquier habla anterior
+                window.speechSynthesis.cancel();
                 
                 utterance_{component_id} = new SpeechSynthesisUtterance(text_{component_id});
                 utterance_{component_id}.lang = 'es-ES';
@@ -189,38 +181,23 @@ def text_to_speech_component(text, auto_play=False, component_key_suffix=""):
                 if (window.speechSynthesis) {{
                     window.speechSynthesis.cancel();
                 }}
-                // onend se encargará de actualizar los botones y estado
             }}
             
-            // Autoplay si está habilitado y el componente se carga
-            // El timeout es para dar tiempo al navegador a inicializar la síntesis de voz
-            // y para que el componente sea visible y el usuario perciba que algo va a sonar.
             if ({str(auto_play).lower()}) {{
                 setTimeout(() => {{
-                    // Comprobar si el componente aún existe en el DOM,
-                    // ya que Streamlit puede re-renderizar rápido.
                     if (document.getElementById('playBtn_{component_id}')) {{
                        speakText_{component_id}();
                     }}
-                }}, 700); // Un pequeño delay
+                }}, 700);
             }}
         </script>
     </body>
     </html>
     """
-    components.html(html_code, height=65) # Ajustar altura según necesidad
+    components.html(html_code, height=65)
 
-# --- NUEVO: Componente de Reconocimiento de Voz ---
 def voice_input_component(chat_input_key="chat_input_main"):
-    """
-    Crea un componente HTML con JavaScript para reconocimiento de voz.
-    El texto reconocido se inserta en el st.chat_input y se envía.
-    """
-    # El placeholder de st.chat_input se usa para encontrar el textarea
-    # Asegúrate que coincida con el placeholder de tu st.chat_input
-    chat_input_placeholder = "Pregunta a EmprendoBot sobre tu idea IoT..."
     component_id = f"voice_input_{uuid.uuid4().hex[:8]}"
-
     html_code = f"""
     <!DOCTYPE html>
     <html>
@@ -238,8 +215,8 @@ def voice_input_component(chat_input_key="chat_input_main"):
             }}
             #voiceBtn_{component_id}:hover {{ background-color: #574FE0; }}
             #voiceBtn_{component_id}:active {{ transform: scale(0.95); }}
-            #voiceBtn_{component_id}.recording {{ background-color: #FF6347; }} /* Rojo cuando graba */
-            #voiceStatus_{component_id} {{ font-size: 14px; color: #555; }}
+            #voiceBtn_{component_id}.recording {{ background-color: #FF6347; }}
+            #voiceStatus_{component_id} {{ font-size: 14px; color: #555; min-width: 150px; text-align: left;}}
         </style>
     </head>
     <body>
@@ -256,8 +233,8 @@ def voice_input_component(chat_input_key="chat_input_main"):
             if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {{
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 recognition = new SpeechRecognition();
-                recognition.continuous = false; // Capturar una sola frase
-                recognition.interimResults = false; // Solo resultados finales
+                recognition.continuous = false;
+                recognition.interimResults = false;
                 recognition.lang = 'es-ES';
 
                 recognition.onstart = () => {{
@@ -268,64 +245,74 @@ def voice_input_component(chat_input_key="chat_input_main"):
 
                 recognition.onresult = (event) => {{
                     const transcript = event.results[0][0].transcript;
+                    console.log("Voz reconocida:", transcript);
                     voiceStatus.textContent = 'Procesando: ' + transcript.substring(0,20) + (transcript.length > 20 ? '...' : '');
                     
-                    // Encuentra el textarea de st.chat_input por su data-testid o aria-label
-                    // El data-testid="stChatInput" es más robusto si está disponible.
-                    // Si no, el aria-label="placeholder_text" es una alternativa.
-                    const chatTextArea = document.parentWindow.document.querySelector('textarea[data-testid="stChatInput"]');
-                    // const chatTextArea = document.parentWindow.document.querySelector('textarea[aria-label="{chat_input_placeholder}"]');
-
+                    let chatTextArea = document.parentWindow.document.querySelector('textarea[data-testid="stChatInputTextArea"]');
+                    
+                    if (!chatTextArea) {{
+                        console.log("Selector 'stChatInputTextArea' no encontrado. Intentando selector de fallback...");
+                        const chatInputContainer = document.parentWindow.document.querySelector('[data-testid="stChatInput"]');
+                        if (chatInputContainer) {{
+                            chatTextArea = chatInputContainer.querySelector('textarea');
+                        }}
+                    }}
 
                     if (chatTextArea) {{
+                        console.log("Textarea del chat encontrado:", chatTextArea);
                         chatTextArea.value = transcript;
-                        // Disparar evento 'input' para que Streamlit/React reconozca el cambio
-                        chatTextArea.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        
-                        // Simular 'Enter' para enviar el formulario de chat_input
-                        // Es importante enfocar primero para que el evento se capture correctamente
-                        chatTextArea.focus();
-                        const enterEvent = new KeyboardEvent('keydown', {{
-                            key: 'Enter',
-                            code: 'Enter',
-                            keyCode: 13,
-                            which: 13,
-                            bubbles: true,
-                            cancelable: true
-                        }});
-                        chatTextArea.dispatchEvent(enterEvent);
-                        // chatTextArea.blur(); // Opcional: quitar foco después
-                        voiceStatus.textContent = 'Enviado!';
+
+                        chatTextArea.dispatchEvent(new Event('input', {{ bubbles: true, cancelable: true }}));
+                        chatTextArea.dispatchEvent(new Event('change', {{ bubbles: true, cancelable: true }}));
+
+                        setTimeout(() => {{
+                            chatTextArea.focus();
+                            
+                            const enterEvent = new KeyboardEvent('keydown', {{
+                                key: 'Enter',
+                                code: 'Enter',
+                                keyCode: 13,
+                                which: 13,
+                                bubbles: true,
+                                cancelable: true
+                            }});
+                            chatTextArea.dispatchEvent(enterEvent);
+                            
+                            console.log("Evento Enter simulado en el textarea.");
+                            voiceStatus.textContent = '¡Enviado por voz!';
+                        }}, 100);
+
                     }} else {{
-                        voiceStatus.textContent = 'Error: No se encontró el campo de chat.';
-                        console.error('Streamlit chat input textarea not found.');
+                        voiceStatus.textContent = 'Error: Campo de chat no encontrado.';
+                        console.error('Error: Streamlit chat input textarea no se pudo encontrar. Verifica los selectores data-testid.');
                     }}
                 }};
 
                 recognition.onerror = (event) => {{
                     console.error('Error de reconocimiento de voz:', event.error);
+                    let errorMsg = 'Error: ' + event.error;
                     if (event.error === 'no-speech') {{
-                        voiceStatus.textContent = 'No se detectó voz. Intenta de nuevo.';
+                        errorMsg = 'No se detectó voz.';
                     }} else if (event.error === 'audio-capture') {{
-                        voiceStatus.textContent = 'Error de micrófono. Revisa permisos.';
+                        errorMsg = 'Error de micrófono.';
                     }} else if (event.error === 'not-allowed') {{
-                        voiceStatus.textContent = 'Permiso de micrófono denegado.';
-                    }} else {{
-                        voiceStatus.textContent = 'Error: ' + event.error;
+                        errorMsg = 'Permiso de micrófono denegado.';
                     }}
+                    voiceStatus.textContent = errorMsg;
                     voiceBtn.classList.remove('recording');
                     voiceBtn.disabled = false;
                 }};
 
                 recognition.onend = () => {{
-                    // voiceStatus.textContent = 'Haz clic en 🎤 para hablar.'; // O se limpia por onresult
                     voiceBtn.classList.remove('recording');
                     voiceBtn.disabled = false;
                 }};
 
                 voiceBtn.addEventListener('click', () => {{
                     try {{
-                        recognition.start();
+                        if (recognition) {{
+                           recognition.start();
+                        }}
                     }} catch (e) {{
                         voiceStatus.textContent = 'Error al iniciar grabación.';
                         console.error("Error starting recognition: ", e);
@@ -334,8 +321,9 @@ def voice_input_component(chat_input_key="chat_input_main"):
                     }}
                 }});
             }} else {{
-                voiceStatus.textContent = 'Reconocimiento de voz no disponible en este navegador.';
+                voiceStatus.textContent = 'Voz no disponible.';
                 voiceBtn.disabled = true;
+                voiceBtn.title = 'Reconocimiento de voz no disponible en este navegador.';
                 voiceBtn.style.backgroundColor = '#ccc';
             }}
         </script>
@@ -344,17 +332,15 @@ def voice_input_component(chat_input_key="chat_input_main"):
     """
     components.html(html_code, height=55)
 
-# --- Interfaz de Streamlit ---
 st.title("🚀 EmprendoBot IoT Assistant")
 st.caption("Tu copiloto para ideas de negocio IoT y planes de emprendimiento. Prueba el micrófono 🎤!")
 
-# --- Sidebar para Opciones ---
 with st.sidebar:
     st.header("⚙️ Opciones")
     
-    auto_tts = st.checkbox("🔊 Reproducir respuestas automáticamente", value=False, 
+    auto_tts_checkbox = st.checkbox("🔊 Reproducir respuestas automáticamente", value=False, 
                            help="Las respuestas del bot se reproducirán automáticamente al generarse.")
-    st.session_state.auto_tts = auto_tts # Guardar en session_state para acceso global
+    st.session_state.auto_tts = auto_tts_checkbox
     
     st.subheader("Parámetros del Modelo")
     if "max_tokens" not in st.session_state:
@@ -371,6 +357,7 @@ with st.sidebar:
         st.session_state.messages = [
             {"role": "system", "content": SYSTEM_PROMPT_ENTREPRENEURSHIP_IOT}
         ]
+        st.session_state.example_question = None # Limpiar también pregunta de ejemplo
         st.success("Historial de chat limpiado.")
         st.rerun()
 
@@ -395,23 +382,22 @@ with st.sidebar:
     ]
     for i, question in enumerate(example_questions):
         if st.button(f"💬 {question}", use_container_width=True, key=f"example_{i}"):
-            st.session_state.example_question = question # Guardar la pregunta
-            # No necesitamos reran inmediato aquí, process_user_input lo manejará
+            st.session_state.example_question = question
 
     st.markdown("---")
     st.markdown("**Desarrollado con IA y ☕**")
     st.markdown("El reconocimiento de voz funciona mejor en Chrome.")
 
-# --- Inicializar historial de chat en session_state ---
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "system", "content": SYSTEM_PROMPT_ENTREPRENEURSHIP_IOT}
     ]
-if "auto_tts" not in st.session_state: # Inicializar si no está
+if "auto_tts" not in st.session_state:
     st.session_state.auto_tts = False
+if "example_question" not in st.session_state:
+    st.session_state.example_question = None
 
 
-# --- Mostrar mensajes del chat ---
 for i, message in enumerate(st.session_state.messages):
     if message["role"] == "system":
         continue
@@ -419,15 +405,10 @@ for i, message in enumerate(st.session_state.messages):
         st.markdown(message["content"])
         
         if message["role"] == "assistant":
-            # Mostrar componente TTS para cada respuesta del asistente
-            # No auto-reproducir mensajes antiguos, solo el más reciente si auto_tts está activo
-            # y es la última respuesta. Esto se maneja en process_user_input.
             text_to_speech_component(message["content"], auto_play=False, component_key_suffix=f"history_{i}")
 
-
-# --- Lógica de interacción ---
 def process_user_input(user_text):
-    if not user_text: # No procesar si el texto está vacío
+    if not user_text:
         return
 
     st.session_state.messages.append({"role": "user", "content": user_text})
@@ -448,7 +429,6 @@ def process_user_input(user_text):
 
         final_response = display_typing_effect(assistant_response, message_placeholder)
         
-        # Usar el valor de auto_tts de session_state
         should_autoplay_tts = st.session_state.get("auto_tts", False)
         text_to_speech_component(final_response, auto_play=should_autoplay_tts, component_key_suffix="latest_response")
 
@@ -459,35 +439,26 @@ def process_user_input(user_text):
         system_msg = [st.session_state.messages[0]] if st.session_state.messages[0]["role"] == "system" else []
         st.session_state.messages = system_msg + st.session_state.messages[-(max_history_streamlit - len(system_msg)):]
 
-# --- Procesar pregunta de ejemplo si se seleccionó ---
-# Esto debe ir ANTES del chat_input para que la pregunta se procese y se muestre.
-if 'example_question' in st.session_state and st.session_state.example_question:
+if st.session_state.example_question:
     question_to_process = st.session_state.example_question
-    del st.session_state.example_question # Procesar solo una vez
+    st.session_state.example_question = None 
     process_user_input(question_to_process)
-    # No es necesario st.rerun() aquí, la actualización del chat ya lo fuerza.
+    st.rerun() 
 
-# --- Input del chat y botón de voz ---
-# El key="chat_input_main" es importante para el componente de voz
 user_prompt = st.chat_input("Pregunta a EmprendoBot sobre tu idea IoT...", key="chat_input_main")
-
-# Colocar el botón de voz DESPUÉS del chat_input para que el JS lo encuentre más fácilmente
-# al momento de ejecutar.
 voice_input_component(chat_input_key="chat_input_main")
 
 if user_prompt:
     process_user_input(user_prompt)
-    # st.rerun() # No es necesario aquí, process_user_input ya actualiza el estado
+    st.rerun() 
 
-# --- Información adicional (solo si no hay conversación iniciada y no se procesó ejemplo) ---
-if len(st.session_state.messages) <= 1 and 'example_question' not in st.session_state:
+if len(st.session_state.messages) <= 1 and not st.session_state.example_question:
     st.markdown("---")
     col1, col2, col3 = st.columns(3)
     with col1: st.markdown("### 🏠 Hogar Inteligente\nAutomatización, seguridad, eficiencia energética")
     with col2: st.markdown("### 🏭 Industria 4.0\nSensores industriales, mantenimiento predictivo")
     with col3: st.markdown("### 🌱 AgTech\nAgricultura de precisión, monitoreo ambiental")
 
-# --- Verificar configuración (API Key) ---
 if not API_KEY:
     st.error("⚠️ **Configuración requerida**: Necesitas configurar tu API Key de DeepSeek en los secrets de Streamlit.")
     with st.expander("📋 Instrucciones de configuración"):
