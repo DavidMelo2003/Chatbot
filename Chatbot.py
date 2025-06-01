@@ -93,14 +93,12 @@ def display_typing_effect(text, placeholder):
 
 def text_to_speech_component(text, auto_play=False):
     """Crea un componente HTML con JavaScript para TTS que funciona mejor en Streamlit."""
-    # Limpiar el texto para JavaScript
+
     clean_text = text.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"').replace("\n", " ").replace("\r", "")
     
-    # Truncar si es muy largo (límite de caracteres para TTS)
     if len(clean_text) > 1000:
         clean_text = clean_text[:997] + "..."
     
-    # ID único para evitar conflictos
     component_id = f"tts_{hash(text) % 10000}"
     
     html_code = f"""
@@ -255,7 +253,6 @@ st.caption("Tu copiloto para ideas de negocio IoT y planes de emprendimiento.")
 # --- Sidebar para Opciones ---
 with st.sidebar:
     st.header("⚙️ Opciones")
-    st.info("💡 **Versión Cloud Optimizada**\n\nEsta versión está optimizada para funcionar perfectamente en Streamlit Cloud sin dependencias de sistema.")
     
     # Opción para TTS automático
     auto_tts = st.checkbox("🔊 Reproducir respuestas automáticamente", value=False, help="Las respuestas se reproducirán automáticamente al generarse")
