@@ -91,15 +91,248 @@ def display_typing_effect(text, placeholder):
     placeholder.markdown(full_response.strip())
     return full_response.strip()
 
-def text_to_speech_component(text, auto_play=False):
-    """Crea un componente HTML con JavaScript para TTS que funciona mejor en Streamlit."""
+def speech_to_text_component():
+    """Componente de reconocimiento de voz (Speech-to-Text)."""
+    
+    html_code = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body {
+                margin: 0;
+                padding: 10px;
+                font-family: Arial, sans-serif;
+            }
+            .stt-container {
+                text-align: center;
+                background: linear-gradient(90deg, #ff6b6b 0%, #ee5a52 100%);
+                border-radius: 10px;
+                padding: 15px;
+                color: white;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+                margin-bottom: 15px;
+            }
+            .stt-button {
+                background: rgba(255,255,255,0.2);
+                border: 2px solid rgba(255,255,255,0.3);
+                color: white;
+                padding: 12px 24px;
+                border-radius: 25px;
+                cursor: pointer;
+                font-size: 16px;
+                margin: 5px;
+                transition: all 0.3s ease;
+            }
+            .stt-button:hover {
+                background: rgba(255,255,255,0.3);
+                transform: translateY(-2px);
+            }
+            .stt-button:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+            .stt-button.recording {
+                background: rgba(255,255,255,0.4);
+                animation: pulse 1.5s infinite;
+            }
+            @keyframes pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.05); }
+                100% { transform: scale(1); }
+            }
+            .status {
+                margin-top: 10px;
+                font-size: 14px;
+                min-height: 20px;
+            }
+            .transcript {
+                background: rgba(255,255,255,0.1);
+                border-radius: 8px;
+                padding: 10px;
+                margin-top: 10px;
+                min-height: 40px;
+                font-style: italic;
+                border: 1px solid rgba(255,255,255,0.2);
+            }
+            .mic-icon {
+                font-size: 20px;
+                margin-right: 8px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="stt-container">
+            <div>
+                <button id="startBtn" class="stt-button" onclick="startRecording()">
+                    <span class="mic-icon">🎤</span>Iniciar Grabación
+                </button>
+                <button id="stopBtn" class="stt-button" onclick="stopRecording()" disabled>
+                    <span class="mic-icon">⏹️</span>Detener
+                </button>
+                <button id="sendBtn" class="stt-button" onclick="sendTranscript()" disabled>
+                    <span class="mic-icon">📤</span>Enviar Texto
+                </button>
+            </div>
+            <div id="status" class="status">Listo para grabar</div>
+            <div id="transcript" class="transcript">Tu voz aparecerá aquí...</div>
+        </div>
 
+        <script>
+            let recognition = null;
+            let isRecording = false;
+            let finalTranscript = '';
+
+            function updateStatus(message) {
+                const statusEl = document.getElementById('status');
+                if (statusEl) statusEl.textContent = message;
+            }
+
+            function updateTranscript(text) {
+                const transcriptEl = document.getElementById('transcript');
+                if (transcriptEl) transcriptEl.textContent = text || 'Tu voz aparecerá aquí...';
+            }
+
+            function toggleButtons(recording) {
+                const startBtn = document.getElementById('startBtn');
+                const stopBtn = document.getElementById('stopBtn');
+                const sendBtn = document.getElementById('sendBtn');
+                
+                if (startBtn) {
+                    startBtn.disabled = recording;
+                    if (recording) {
+                        startBtn.classList.add('recording');
+                    } else {
+                        startBtn.classList.remove('recording');
+                    }
+                }
+                if (stopBtn) stopBtn.disabled = !recording;
+                if (sendBtn) sendBtn.disabled = !finalTranscript.trim();
+            }
+
+            function initSpeechRecognition() {
+                if ('webkitSpeechRecognition' in window) {
+                    recognition = new webkitSpeechRecognition();
+                } else if ('SpeechRecognition' in window) {
+                    recognition = new SpeechRecognition();
+                } else {
+                    updateStatus('❌ Reconocimiento de voz no disponible');
+                    return false;
+                }
+
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'es-ES';
+
+                recognition.onstart = function() {
+                    isRecording = true;
+                    toggleButtons(true);
+                    updateStatus('🎤 Escuchando... Habla ahora');
+                    updateTranscript('Escuchando...');
+                };
+
+                recognition.onresult = function(event) {
+                    let interimTranscript = '';
+                    
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        const transcript = event.results[i][0].transcript;
+                        if (event.results[i].isFinal) {
+                            finalTranscript += transcript + ' ';
+                        } else {
+                            interimTranscript += transcript;
+                        }
+                    }
+                    
+                    const displayText = finalTranscript + interimTranscript;
+                    updateTranscript(displayText);
+                    
+                    if (finalTranscript.trim()) {
+                        const sendBtn = document.getElementById('sendBtn');
+                        if (sendBtn) sendBtn.disabled = false;
+                    }
+                };
+
+                recognition.onerror = function(event) {
+                    updateStatus('❌ Error: ' + event.error);
+                    isRecording = false;
+                    toggleButtons(false);
+                };
+
+                recognition.onend = function() {
+                    isRecording = false;
+                    toggleButtons(false);
+                    if (finalTranscript.trim()) {
+                        updateStatus('✅ Grabación completada - Puedes enviar el texto');
+                    } else {
+                        updateStatus('⚠️ No se detectó texto');
+                    }
+                };
+
+                return true;
+            }
+
+            function startRecording() {
+                if (!recognition && !initSpeechRecognition()) {
+                    return;
+                }
+                
+                finalTranscript = '';
+                updateTranscript('');
+                
+                try {
+                    recognition.start();
+                } catch (error) {
+                    updateStatus('❌ Error al iniciar grabación');
+                    console.error('Error:', error);
+                }
+            }
+
+            function stopRecording() {
+                if (recognition && isRecording) {
+                    recognition.stop();
+                }
+            }
+
+            function sendTranscript() {
+                if (finalTranscript.trim()) {
+                    // Enviar el texto a Streamlit usando postMessage
+                    window.parent.postMessage({
+                        type: 'streamlit:speech_text',
+                        text: finalTranscript.trim()
+                    }, '*');
+                    
+                    // Limpiar transcript
+                    finalTranscript = '';
+                    updateTranscript('Texto enviado. Listo para nueva grabación.');
+                    updateStatus('📤 Texto enviado correctamente');
+                    
+                    const sendBtn = document.getElementById('sendBtn');
+                    if (sendBtn) sendBtn.disabled = true;
+                }
+            }
+
+            // Inicializar al cargar
+            window.addEventListener('load', function() {
+                initSpeechRecognition();
+            });
+        </script>
+    </body>
+    </html>
+    """
+    
+    return components.html(html_code, height=200)
+
+def text_to_speech_component(text, auto_play=False):
+    """Crea un componente HTML con JavaScript para TTS mejorado."""
+    
     clean_text = text.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"').replace("\n", " ").replace("\r", "")
     
     if len(clean_text) > 1000:
         clean_text = clean_text[:997] + "..."
     
-    component_id = f"tts_{hash(text) % 10000}"
+    component_id = f"tts_{abs(hash(text)) % 10000}"
+    auto_play_str = "true" if auto_play else "false"
     
     html_code = f"""
     <!DOCTYPE html>
@@ -139,6 +372,15 @@ def text_to_speech_component(text, auto_play=False):
                 opacity: 0.5;
                 cursor: not-allowed;
             }}
+            .tts-button.speaking {{
+                background: rgba(255,255,255,0.4);
+                animation: speakPulse 1s infinite;
+            }}
+            @keyframes speakPulse {{
+                0% {{ transform: scale(1); }}
+                50% {{ transform: scale(1.05); }}
+                100% {{ transform: scale(1); }}
+            }}
             .status {{
                 margin-top: 10px;
                 font-size: 14px;
@@ -166,6 +408,7 @@ def text_to_speech_component(text, auto_play=False):
         <script>
             const text_{component_id} = `{clean_text}`;
             let utterance_{component_id} = null;
+            let isAutoPlay_{component_id} = {auto_play_str};
             
             function updateStatus_{component_id}(message) {{
                 const statusEl = document.getElementById('status_{component_id}');
@@ -186,7 +429,10 @@ def text_to_speech_component(text, auto_play=False):
                     utterance_{component_id}.onstart = function() {{
                         const playBtn = document.getElementById('playBtn_{component_id}');
                         const stopBtn = document.getElementById('stopBtn_{component_id}');
-                        if (playBtn) playBtn.disabled = true;
+                        if (playBtn) {{
+                            playBtn.disabled = true;
+                            playBtn.classList.add('speaking');
+                        }}
                         if (stopBtn) stopBtn.disabled = false;
                         updateStatus_{component_id}('🎤 Reproduciendo...');
                     }};
@@ -194,7 +440,10 @@ def text_to_speech_component(text, auto_play=False):
                     utterance_{component_id}.onend = function() {{
                         const playBtn = document.getElementById('playBtn_{component_id}');
                         const stopBtn = document.getElementById('stopBtn_{component_id}');
-                        if (playBtn) playBtn.disabled = false;
+                        if (playBtn) {{
+                            playBtn.disabled = false;
+                            playBtn.classList.remove('speaking');
+                        }}
                         if (stopBtn) stopBtn.disabled = true;
                         updateStatus_{component_id}('✅ Reproducción completada');
                     }};
@@ -202,7 +451,10 @@ def text_to_speech_component(text, auto_play=False):
                     utterance_{component_id}.onerror = function(event) {{
                         const playBtn = document.getElementById('playBtn_{component_id}');
                         const stopBtn = document.getElementById('stopBtn_{component_id}');
-                        if (playBtn) playBtn.disabled = false;
+                        if (playBtn) {{
+                            playBtn.disabled = false;
+                            playBtn.classList.remove('speaking');
+                        }}
                         if (stopBtn) stopBtn.disabled = true;
                         updateStatus_{component_id}('❌ Error en la reproducción');
                         console.error('Error TTS:', event.error);
@@ -224,27 +476,49 @@ def text_to_speech_component(text, auto_play=False):
                     window.speechSynthesis.cancel();
                     const playBtn = document.getElementById('playBtn_{component_id}');
                     const stopBtn = document.getElementById('stopBtn_{component_id}');
-                    if (playBtn) playBtn.disabled = false;
+                    if (playBtn) {{
+                        playBtn.disabled = false;
+                        playBtn.classList.remove('speaking');
+                    }}
                     if (stopBtn) stopBtn.disabled = true;
                     updateStatus_{component_id}('⏸️ Reproducción detenida');
                 }}
             }}
             
-            // Auto-reproducir si está habilitado
+            // Auto-reproducir con mejor timing
+            function tryAutoPlay_{component_id}() {{
+                if (isAutoPlay_{component_id} && 'speechSynthesis' in window) {{
+                    // Esperar a que el sistema esté listo
+                    if (window.speechSynthesis.getVoices().length > 0) {{
+                        setTimeout(() => speakText_{component_id}(), 500);
+                    }} else {{
+                        // Retry si las voces no están cargadas
+                        setTimeout(() => tryAutoPlay_{component_id}(), 1000);
+                    }}
+                }}
+            }}
+            
+            // Inicializar al cargar
             window.addEventListener('load', function() {{
                 setTimeout(function() {{
-                    if ({str(auto_play).lower()}) {{
-                        speakText_{component_id}();
-                    }}
-                }}, 1000);
+                    tryAutoPlay_{component_id}();
+                }}, 1500);
             }});
+            
+            // Cargar voces cuando estén disponibles
+            if ('speechSynthesis' in window) {{
+                speechSynthesis.addEventListener('voiceschanged', function() {{
+                    if (isAutoPlay_{component_id}) {{
+                        setTimeout(() => tryAutoPlay_{component_id}(), 500);
+                    }}
+                }});
+            }}
         </script>
     </body>
     </html>
     """
     
-    # Usar componente HTML sin key
-    components.html(html_code, height=120)
+    return components.html(html_code, height=120)
 
 # --- Interfaz de Streamlit ---
 st.title("🚀 EmprendoBot IoT Assistant")
@@ -314,6 +588,10 @@ if "messages" not in st.session_state:
         {"role": "system", "content": SYSTEM_PROMPT_ENTREPRENEURSHIP_IOT}
     ]
 
+# --- Componente de reconocimiento de voz ---
+st.markdown("### 🎤 Habla con EmprendoBot")
+speech_result = speech_to_text_component()
+
 # --- Mostrar mensajes del chat ---
 for i, message in enumerate(st.session_state.messages):
     if message["role"] == "system":
@@ -363,11 +641,7 @@ def process_user_input(user_text):
             final_response = display_typing_effect(assistant_response, message_placeholder)
             
             # Componente TTS para la nueva respuesta
-            if auto_tts:
-                # Si está en modo automático, auto-reproducir
-                text_to_speech_component(final_response, auto_play=True)
-            else:
-                text_to_speech_component(final_response, auto_play=False)
+            text_to_speech_component(final_response, auto_play=auto_tts)
 
         # Agregar respuesta al historial
         st.session_state.messages.append({"role": "assistant", "content": final_response})
@@ -387,6 +661,20 @@ def process_user_input(user_text):
 if hasattr(st.session_state, 'example_question'):
     process_user_input(st.session_state.example_question)
     del st.session_state.example_question
+    st.rerun()
+
+# --- Manejar texto de voz ---
+# Nota: En Streamlit real, necesitarías usar st_javascript o similar para capturar el postMessage
+# Para esta versión, agregaremos un input especial para simular la funcionalidad
+if "speech_input" not in st.session_state:
+    st.session_state.speech_input = ""
+
+# Input especial para texto de voz (en producción esto se manejaría con JavaScript)
+speech_text = st.text_input("🎤 Texto capturado por voz:", value=st.session_state.speech_input, key="speech_text_input")
+if speech_text and speech_text != st.session_state.speech_input:
+    st.session_state.speech_input = speech_text
+    process_user_input(speech_text)
+    st.session_state.speech_input = ""  # Limpiar después de procesar
     st.rerun()
 
 # --- Input del chat ---
@@ -421,3 +709,24 @@ if not API_KEY:
         ```  
         4. Guarda y reinicia la app  
         """)
+
+# --- JavaScript para capturar mensajes del componente de voz ---
+components.html("""
+<script>
+window.addEventListener('message', function(event) {
+    if (event.data.type === 'streamlit:speech_text') {
+        // En Streamlit real, aquí enviarías el texto a través de st_javascript
+        // Por ahora, lo mostramos en consola
+        console.log('Texto capturado:', event.data.text);
+        
+        // Simular envío del texto al input
+        const speechInput = window.parent.document.querySelector('input[aria-label="🎤 Texto capturado por voz:"]');
+        if (speechInput) {
+            speechInput.value = event.data.text;
+            speechInput.dispatchEvent(new Event('input', { bubbles: true }));
+            speechInput.focus();
+        }
+    }
+});
+</script>
+""", height=0)
