@@ -4,6 +4,7 @@ import requests
 import json
 import time
 import os
+import uuid
 
 # --- 1. CONFIGURACIÓN INICIAL DE STREAMLIT ---
 st.set_page_config(page_title="EmprendoBot IoT", layout="wide", initial_sidebar_state="expanded")
@@ -84,239 +85,457 @@ def display_typing_effect(text, placeholder):
 
 def text_to_speech_component(text, auto_play=False):
     """
-    Crea un componente HTML con JavaScript para TTS (speechSynthesis),
-    con un retardo controlado para que el auto-play sea más confiable.
+    Componente HTML con JavaScript para TTS mejorado y más compatible.
     """
-    # Limpieza básica del texto
+    # Limpieza y preparación del texto
     clean_text = text.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')\
-                     .replace("\n", " ").replace("\r", "")
-    if len(clean_text) > 1000:
-        clean_text = clean_text[:997] + "..."
-    component_id = f"tts_{hash(text) % 10000}"
+                     .replace("\n", " ").replace("\r", "").replace("`", "")
+    if len(clean_text) > 800:
+        clean_text = clean_text[:797] + "..."
+    
+    # ID único para evitar conflictos
+    component_id = str(uuid.uuid4())[:8]
 
     html_code = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
             body {{
-                margin: 0; padding: 10px; font-family: Arial, sans-serif;
+                margin: 0; 
+                padding: 10px; 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: #f8f9fa;
             }}
             .tts-container {{
                 text-align: center;
-                background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-                border-radius: 10px;
-                padding: 15px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 12px;
+                padding: 20px;
                 color: white;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+                box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+                max-width: 400px;
+                margin: 0 auto;
             }}
             .tts-button {{
-                background: rgba(255,255,255,0.2);
+                background: rgba(255,255,255,0.15);
                 border: 2px solid rgba(255,255,255,0.3);
                 color: white;
-                padding: 10px 20px;
-                border-radius: 25px;
+                padding: 12px 24px;
+                border-radius: 30px;
                 cursor: pointer;
-                font-size: 16px;
-                margin: 5px;
-                transition: all 0.3s ease;
+                font-size: 15px;
+                font-weight: 500;
+                margin: 6px;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
             }}
-            .tts-button:hover {{
-                background: rgba(255,255,255,0.3);
-                transform: translateY(-2px);
+            .tts-button:hover:not(:disabled) {{
+                background: rgba(255,255,255,0.25);
+                transform: translateY(-1px);
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            }}
+            .tts-button:active {{
+                transform: translateY(0);
             }}
             .tts-button:disabled {{
                 opacity: 0.5;
                 cursor: not-allowed;
+                transform: none;
             }}
             .status {{
-                margin-top: 10px;
-                font-size: 14px;
+                margin-top: 15px;
+                font-size: 13px;
                 min-height: 20px;
+                font-weight: 400;
+                opacity: 0.9;
             }}
-            .speaker-icon {{
-                font-size: 20px;
-                margin-right: 8px;
+            .icon {{
+                font-size: 16px;
             }}
         </style>
     </head>
     <body>
         <div class="tts-container">
             <div>
-                <button id="playBtn_{component_id}" class="tts-button" onclick="speakText_{component_id}()">
-                    <span class="speaker-icon">🔊</span>Escuchar Respuesta
+                <button id="playBtn_{component_id}" class="tts-button" onclick="handlePlay_{component_id}()">
+                    <span class="icon">🔊</span>Reproducir Audio
                 </button>
-                <button id="stopBtn_{component_id}" class="tts-button" onclick="stopSpeech_{component_id}()" disabled>
-                    <span class="speaker-icon">⏹️</span>Detener
+                <button id="stopBtn_{component_id}" class="tts-button" onclick="handleStop_{component_id}()" disabled>
+                    <span class="icon">⏹️</span>Detener
                 </button>
             </div>
             <div id="status_{component_id}" class="status">Listo para reproducir</div>
         </div>
 
         <script>
-            const text_{component_id} = `{clean_text}`;
-            let utterance_{component_id} = null;
+            (function() {{
+                const componentId = '{component_id}';
+                const textToSpeak = `{clean_text}`;
+                let currentUtterance = null;
+                let isInitialized = false;
 
-            function updateStatus_{component_id}(message) {{
-                const statusEl = document.getElementById('status_{component_id}');
-                if (statusEl) statusEl.textContent = message;
-            }}
+                function updateStatus(message) {{
+                    const statusEl = document.getElementById(`status_${{componentId}}`);
+                    if (statusEl) statusEl.textContent = message;
+                }}
 
-            async function ensureSpeechSynthesisReady() {{
-                return new Promise(resolve => {{
-                    if (window.speechSynthesis.getVoices().length > 0) {{
-                        resolve();
-                    }} else {{
-                        window.speechSynthesis.onvoiceschanged = () => resolve();
+                function updateButtons(playing) {{
+                    const playBtn = document.getElementById(`playBtn_${{componentId}}`);
+                    const stopBtn = document.getElementById(`stopBtn_${{componentId}}`);
+                    if (playBtn) playBtn.disabled = playing;
+                    if (stopBtn) stopBtn.disabled = !playing;
+                }}
+
+                async function initializeSpeech() {{
+                    if (isInitialized) return true;
+                    
+                    if (!('speechSynthesis' in window)) {{
+                        updateStatus('❌ Text-to-Speech no disponible');
+                        return false;
+                    }}
+
+                    // Esperar a que las voces estén disponibles
+                    return new Promise((resolve) => {{
+                        const checkVoices = () => {{
+                            const voices = speechSynthesis.getVoices();
+                            if (voices.length > 0) {{
+                                isInitialized = true;
+                                resolve(true);
+                            }} else {{
+                                setTimeout(checkVoices, 100);
+                            }}
+                        }};
+                        
+                        if (speechSynthesis.onvoiceschanged !== undefined) {{
+                            speechSynthesis.onvoiceschanged = checkVoices;
+                        }}
+                        checkVoices();
+                    }});
+                }}
+
+                window.handlePlay_{component_id} = async function() {{
+                    try {{
+                        const initialized = await initializeSpeech();
+                        if (!initialized) return;
+
+                        // Cancelar cualquier reproducción anterior
+                        speechSynthesis.cancel();
+                        
+                        // Crear nueva utterance
+                        currentUtterance = new SpeechSynthesisUtterance(textToSpeak);
+                        
+                        // Configurar voz en español
+                        const voices = speechSynthesis.getVoices();
+                        const spanishVoice = voices.find(voice => 
+                            voice.lang.startsWith('es') || 
+                            voice.name.toLowerCase().includes('spanish') ||
+                            voice.name.toLowerCase().includes('español')
+                        );
+                        
+                        if (spanishVoice) {{
+                            currentUtterance.voice = spanishVoice;
+                        }}
+                        currentUtterance.lang = 'es-ES';
+                        currentUtterance.rate = 0.9;
+                        currentUtterance.pitch = 1.0;
+                        currentUtterance.volume = 0.8;
+
+                        // Event listeners
+                        currentUtterance.onstart = function() {{
+                            updateButtons(true);
+                            updateStatus('🎤 Reproduciendo audio...');
+                        }};
+
+                        currentUtterance.onend = function() {{
+                            updateButtons(false);
+                            updateStatus('✅ Reproducción completada');
+                            currentUtterance = null;
+                        }};
+
+                        currentUtterance.onerror = function(event) {{
+                            updateButtons(false);
+                            updateStatus('❌ Error en reproducción');
+                            console.error('TTS Error:', event);
+                            currentUtterance = null;
+                        }};
+
+                        // Iniciar reproducción
+                        speechSynthesis.speak(currentUtterance);
+
+                    }} catch (error) {{
+                        console.error('Error en TTS:', error);
+                        updateStatus('❌ Error inesperado');
+                        updateButtons(false);
+                    }}
+                }};
+
+                window.handleStop_{component_id} = function() {{
+                    if (speechSynthesis) {{
+                        speechSynthesis.cancel();
+                        updateButtons(false);
+                        updateStatus('⏸️ Reproducción detenida');
+                        currentUtterance = null;
+                    }}
+                }};
+
+                // Auto-play si está habilitado
+                if ({str(auto_play).lower()}) {{
+                    setTimeout(() => {{
+                        window.handlePlay_{component_id}();
+                    }}, 1000);
+                }}
+
+                // Limpiar al salir
+                window.addEventListener('beforeunload', function() {{
+                    if (speechSynthesis) {{
+                        speechSynthesis.cancel();
                     }}
                 }});
-            }}
-
-            async function speakText_{component_id}() {{
-                if (!('speechSynthesis' in window)) {{
-                    updateStatus_{component_id}('❌ TTS no disponible en este navegador');
-                    return;
-                }}
-                try {{
-                    await ensureSpeechSynthesisReady();
-                }} catch (err) {{
-                    console.error('Error al preparar TTS:', err);
-                }}
-
-                window.speechSynthesis.cancel();
-                utterance_{component_id} = new SpeechSynthesisUtterance(text_{component_id});
-                utterance_{component_id}.lang = 'es-ES';
-                utterance_{component_id}.rate = 0.9;
-                utterance_{component_id}.pitch = 1.0;
-                utterance_{component_id}.volume = 1.0;
-
-                utterance_{component_id}.onstart = function() {{
-                    document.getElementById('playBtn_{component_id}').disabled = true;
-                    document.getElementById('stopBtn_{component_id}').disabled = false;
-                    updateStatus_{component_id}('🎤 Reproduciendo...');
-                }};
-                utterance_{component_id}.onend = function() {{
-                    document.getElementById('playBtn_{component_id}').disabled = false;
-                    document.getElementById('stopBtn_{component_id}').disabled = true;
-                    updateStatus_{component_id}('✅ Reproducción completada');
-                }};
-                utterance_{component_id}.onerror = function(event) {{
-                    document.getElementById('playBtn_{component_id}').disabled = false;
-                    document.getElementById('stopBtn_{component_id}').disabled = true;
-                    updateStatus_{component_id}('❌ Error en la reproducción');
-                    console.error('Error TTS:', event.error);
-                }};
-
-                window.speechSynthesis.speak(utterance_{component_id});
-            }}
-
-            function stopSpeech_{component_id}() {{
-                if (window.speechSynthesis) {{
-                    window.speechSynthesis.cancel();
-                    document.getElementById('playBtn_{component_id}').disabled = false;
-                    document.getElementById('stopBtn_{component_id}').disabled = true;
-                    updateStatus_{component_id}('⏸️ Reproducción detenida');
-                }}
-            }}
-
-            window.addEventListener('load', function() {{
-                if ({str(auto_play).lower()}) {{
-                    setTimeout(function() {{
-                        speakText_{component_id}();
-                    }}, 500);
-                }}
-            }});
+            }})();
         </script>
     </body>
     </html>
     """
-    components.html(html_code, height=150)
+    components.html(html_code, height=140)
 
 def voice_to_text_component():
     """
-    Componente HTML/JS para reconocimiento de voz en español con SpeechRecognition.
-    Busca el último <textarea> en la página y lo rellena con el texto dictado,
-    luego hace clic en el botón de envío del formulario contenedor.
+    Componente de reconocimiento de voz mejorado para mayor compatibilidad.
     """
+    component_id = str(uuid.uuid4())[:8]
+    
     html_voice = f"""
+    <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body {{
+                margin: 0;
+                padding: 15px;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: #f8f9fa;
+            }}
+            .voice-container {{
+                text-align: center;
+                background: linear-gradient(135deg, #43a047 0%, #66bb6a 100%);
+                border-radius: 12px;
+                padding: 20px;
+                color: white;
+                box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+                max-width: 400px;
+                margin: 0 auto;
+            }}
+            .voice-button {{
+                background: rgba(255,255,255,0.15);
+                border: 2px solid rgba(255,255,255,0.3);
+                color: white;
+                padding: 12px 24px;
+                border-radius: 30px;
+                cursor: pointer;
+                font-size: 15px;
+                font-weight: 500;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+            }}
+            .voice-button:hover:not(:disabled) {{
+                background: rgba(255,255,255,0.25);
+                transform: translateY(-1px);
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            }}
+            .voice-button:disabled {{
+                opacity: 0.5;
+                cursor: not-allowed;
+                transform: none;
+            }}
+            .voice-status {{
+                margin-top: 15px;
+                font-size: 13px;
+                min-height: 20px;
+                font-weight: 400;
+                opacity: 0.9;
+            }}
+            .icon {{
+                font-size: 16px;
+            }}
+            .recording {{
+                animation: pulse 1.5s infinite;
+            }}
+            @keyframes pulse {{
+                0% {{ opacity: 1; }}
+                50% {{ opacity: 0.5; }}
+                100% {{ opacity: 1; }}
+            }}
+        </style>
     </head>
     <body>
-        <div style="text-align:center; padding:10px;">
-            <button id="startRec" style="
-                background: #43a047; 
-                color: white; 
-                border: none; 
-                padding: 10px 20px; 
-                border-radius: 8px; 
-                font-size: 16px; 
-                cursor: pointer;
-            ">
-                🎤 Iniciar dictado
+        <div class="voice-container">
+            <button id="voiceBtn_{component_id}" class="voice-button" onclick="handleVoice_{component_id}()">
+                <span class="icon">🎤</span>Iniciar Dictado
             </button>
-            <span id="statusRec" style="margin-left:20px; font-style: italic; color: #555;">Listo para dictar</span>
+            <div id="voiceStatus_{component_id}" class="voice-status">Listo para dictar</div>
         </div>
+
         <script>
-            window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!window.SpeechRecognition) {{
-                document.getElementById('statusRec').textContent = '❌ Tu navegador no soporta reconocimiento de voz';
-            }} else {{
-                const recognition = new window.SpeechRecognition();
-                recognition.lang = 'es-ES';
-                recognition.interimResults = false;
-                recognition.maxAlternatives = 1;
+            (function() {{
+                const componentId = '{component_id}';
+                let recognition = null;
+                let isListening = false;
 
-                const btn = document.getElementById('startRec');
-                const statusEl = document.getElementById('statusRec');
+                function updateStatus(message, isRecording = false) {{
+                    const statusEl = document.getElementById(`voiceStatus_${{componentId}}`);
+                    const btnEl = document.getElementById(`voiceBtn_${{componentId}}`);
+                    if (statusEl) {{
+                        statusEl.textContent = message;
+                        statusEl.className = isRecording ? 'voice-status recording' : 'voice-status';
+                    }}
+                    if (btnEl) {{
+                        btnEl.disabled = isRecording;
+                        btnEl.className = isRecording ? 'voice-button recording' : 'voice-button';
+                    }}
+                }}
 
-                recognition.onstart = function() {{
-                    statusEl.textContent = '🎤 Escuchando...';
-                    btn.disabled = true;
-                }};
-                recognition.onerror = function(event) {{
-                    statusEl.textContent = '❌ Error en reconocimiento';
-                    btn.disabled = false;
-                }};
-                recognition.onend = function() {{
-                    btn.disabled = false;
-                    if (!recognition.resultIndex) {{
-                        statusEl.textContent = 'Listo para dictar';
+                function initializeRecognition() {{
+                    // Verificar compatibilidad
+                    window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                    
+                    if (!window.SpeechRecognition) {{
+                        updateStatus('❌ Reconocimiento de voz no disponible');
+                        return false;
+                    }}
+
+                    recognition = new window.SpeechRecognition();
+                    recognition.lang = 'es-ES';
+                    recognition.interimResults = false;
+                    recognition.maxAlternatives = 1;
+                    recognition.continuous = false;
+
+                    recognition.onstart = function() {{
+                        isListening = true;
+                        updateStatus('🎤 Escuchando... Habla ahora', true);
+                    }};
+
+                    recognition.onend = function() {{
+                        isListening = false;
+                        updateStatus('Listo para dictar');
+                    }};
+
+                    recognition.onerror = function(event) {{
+                        isListening = false;
+                        console.error('Speech recognition error:', event.error);
+                        let errorMsg = '❌ Error en reconocimiento';
+                        
+                        switch(event.error) {{
+                            case 'no-speech':
+                                errorMsg = '❌ No se detectó voz';
+                                break;
+                            case 'network':
+                                errorMsg = '❌ Error de conexión';
+                                break;
+                            case 'not-allowed':
+                                errorMsg = '❌ Micrófono no permitido';
+                                break;
+                            default:
+                                errorMsg = `❌ Error: ${{event.error}}`;
+                        }}
+                        updateStatus(errorMsg);
+                    }};
+
+                    recognition.onresult = function(event) {{
+                        const transcript = event.results[0][0].transcript.trim();
+                        updateStatus(`✅ Texto capturado: "${{transcript}}"`);
+                        
+                        // Buscar el textarea del chat y rellenarlo
+                        setTimeout(() => {{
+                            try {{
+                                // Buscar específicamente el input del chat de Streamlit
+                                const chatInputs = document.querySelectorAll('textarea[data-testid="stChatInputTextArea"], textarea[placeholder*="Pregunta"], textarea[placeholder*="pregunta"], textarea');
+                                let targetInput = null;
+                                
+                                // Buscar el textarea más relevante
+                                for (let input of chatInputs) {{
+                                    if (input.placeholder && (
+                                        input.placeholder.toLowerCase().includes('pregunta') ||
+                                        input.placeholder.toLowerCase().includes('chat') ||
+                                        input.placeholder.toLowerCase().includes('emprendobot')
+                                    )) {{
+                                        targetInput = input;
+                                        break;
+                                    }}
+                                }}
+                                
+                                // Si no encontró uno específico, usar el último textarea
+                                if (!targetInput && chatInputs.length > 0) {{
+                                    targetInput = chatInputs[chatInputs.length - 1];
+                                }}
+
+                                if (targetInput) {{
+                                    // Enfocar el input y establecer el valor
+                                    targetInput.focus();
+                                    targetInput.value = transcript;
+                                    
+                                    // Disparar eventos para que Streamlit detecte el cambio
+                                    ['input', 'change'].forEach(eventType => {{
+                                        const event = new Event(eventType, {{ bubbles: true }});
+                                        targetInput.dispatchEvent(event);
+                                    }});
+                                    
+                                    // Buscar y hacer clic en el botón de envío
+                                    setTimeout(() => {{
+                                        const sendButtons = document.querySelectorAll('button[data-testid="stChatInputSubmitButton"], button[type="submit"], button[title="Submit"], button');
+                                        for (let btn of sendButtons) {{
+                                            if (btn.textContent.includes('Submit') || 
+                                                btn.getAttribute('data-testid') === 'stChatInputSubmitButton' ||
+                                                btn.querySelector('svg')) {{
+                                                btn.click();
+                                                break;
+                                            }}
+                                        }}
+                                    }}, 300);
+                                    
+                                    updateStatus('✅ Mensaje enviado correctamente');
+                                }} else {{
+                                    updateStatus('❌ No se encontró el campo de chat');
+                                }}
+                            }} catch (error) {{
+                                console.error('Error al procesar el texto:', error);
+                                updateStatus('❌ Error al enviar mensaje');
+                            }}
+                        }}, 200);
+                    }};
+
+                    return true;
+                }}
+
+                window.handleVoice_{component_id} = function() {{
+                    if (!recognition && !initializeRecognition()) {{
+                        return;
+                    }}
+
+                    if (isListening) {{
+                        recognition.stop();
+                        return;
+                    }}
+
+                    try {{
+                        recognition.start();
+                    }} catch (error) {{
+                        console.error('Error starting recognition:', error);
+                        updateStatus('❌ Error al iniciar reconocimiento');
                     }}
                 }};
-                recognition.onresult = function(event) {{
-                    const transcript = event.results[0][0].transcript;
-                    statusEl.textContent = '✅ Capturado: ' + transcript;
-                    setTimeout(function() {{
-                        // Tomamos el último <textarea> que exista en la página
-                        const textareas = document.querySelectorAll('textarea');
-                        const textarea = textareas[textareas.length - 1];
-                        if (textarea) {{
-                            textarea.value = transcript;
-                            const inputEvent = new Event('input', {{ bubbles: true }});
-                            textarea.dispatchEvent(inputEvent);
 
-                            // Buscamos el botón de envío dentro del mismo <form> contenedor
-                            const form = textarea.closest('form');
-                            if (form) {{
-                                const sendButton = form.querySelector('button[type="submit"]');
-                                if (sendButton) {{
-                                    sendButton.click();
-                                }}
-                            }}
-                        }} else {{
-                            console.warn('No se encontró ningún <textarea> en la página');
-                            statusEl.textContent = '❌ No se encontró el campo de chat';
-                        }}
-                    }}, 300);
-                }};
-
-                btn.addEventListener('click', function() {{
-                    recognition.start();
-                }});
-            }}
+                // Inicializar al cargar
+                setTimeout(initializeRecognition, 500);
+            }})();
         </script>
     </body>
     </html>
@@ -359,10 +578,8 @@ def process_user_input(user_text):
             final_response = display_typing_effect(assistant_response, message_placeholder)
 
             # Mostrar componente TTS para la respuesta generada
-            if auto_tts:
-                text_to_speech_component(final_response, auto_play=True)
-            else:
-                text_to_speech_component(final_response, auto_play=False)
+            auto_tts = st.session_state.get("auto_tts", False)
+            text_to_speech_component(final_response, auto_play=auto_tts)
 
         # 3) Añadimos la respuesta al historial y limitamos longitud
         st.session_state.messages.append({"role": "assistant", "content": final_response})
@@ -385,13 +602,18 @@ st.caption("Tu copiloto para ideas de negocio IoT y planes de emprendimiento.")
 # 5.2. Sidebar con opciones
 with st.sidebar:
     st.header("⚙️ Opciones")
-    auto_tts = st.checkbox("🔊 Reproducir respuestas automáticamente", value=False,
-                            help="Las respuestas se reproducirán automáticamente al generarse")
+    st.session_state.auto_tts = st.checkbox(
+        "🔊 Reproducir respuestas automáticamente", 
+        value=st.session_state.get("auto_tts", False),
+        help="Las respuestas se reproducirán automáticamente al generarse"
+    )
+    
     st.subheader("Parámetros del Modelo")
     if "max_tokens" not in st.session_state:
         st.session_state.max_tokens = 1500
     if "temperature" not in st.session_state:
         st.session_state.temperature = 0.7
+    
     st.session_state.max_tokens = st.slider(
         "Max Tokens (longitud respuesta)",
         200, 4000,
@@ -404,6 +626,7 @@ with st.sidebar:
         st.session_state.temperature,
         0.1
     )
+    
     if st.button("🧹 Limpiar Chat", use_container_width=True):
         st.session_state.messages = [
             {"role": "system", "content": SYSTEM_PROMPT_ENTREPRENEURSHIP_IOT}
@@ -423,6 +646,7 @@ with st.sidebar:
     for q in example_questions:
         if st.button(f"💬 {q}", use_container_width=True, key=f"example_{q}"):
             st.session_state.example_question = q
+    
     st.markdown("---")
     st.markdown("**Desarrollado con IA y ☕**")
 
@@ -443,11 +667,18 @@ for i, message in enumerate(st.session_state.messages):
             text_to_speech_component(message["content"], auto_play=False)
 
 # 5.5. Componente de dictado de voz (antes del chat_input)
+st.markdown("### 🎤 Dictado por Voz")
 voice_to_text_component()
 
 # 5.6. Caja de entrada del chat
 if prompt := st.chat_input("Pregunta a EmprendoBot sobre tu idea IoT...", key="chat_input_main"):
     process_user_input(prompt)
+    st.rerun()
+
+# Procesar preguntas de ejemplo
+if "example_question" in st.session_state:
+    process_user_input(st.session_state.example_question)
+    del st.session_state.example_question
     st.rerun()
 
 # 5.7. Mensajes de ejemplo si no hay conversación aún
